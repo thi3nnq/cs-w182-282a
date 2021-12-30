@@ -2,6 +2,7 @@ import torch as th
 from torch import nn
 from torch.nn import functional as F
 
+
 class AttentionLayerLoss(nn.Module):
   """
   Computes the difference between teacher and student attention output.
@@ -23,7 +24,8 @@ class AttentionLayerLoss(nn.Module):
     # Take the MSE loss between the student and teacher attention.
     # To simplify calculations, remember that E[E[X|Y]] = E[X].
     teacher_attn.detach_()
-    loss = 1/teacher_attn.shape[0] * th.sum((teacher_attn - student_attn)**2)
+    
+    loss = ((teacher_attn - student_attn)**2).mean()
     return loss
     ####################################  END OF YOUR CODE  ##################################
 
@@ -49,8 +51,8 @@ class HiddenLayerLoss(nn.Module):
         # then take the MSE loss between the student and teacher hidden layer outputs.
         # To simplify calculations, remember that E[E[X|Y]] = E[X].
         teacher_hddn.detach_()
-        proj_student = 0
-        loss = 0
+        proj_student = self.proj(student_hddn)
+        loss = ((teacher_hddn - proj_student)**2).mean()
         return loss
         ####################################  END OF YOUR CODE  ##################################
 
@@ -75,8 +77,8 @@ class EmbeddingLayerLoss(nn.Module):
         # Then take their MSE loss.
         # To simplify calculations, remember that E[E[X|Y]] = E[X].
         teacher_embd.detach_()
-        proj_student = 0
-        loss = 0
+        proj_student = self.proj(student_embd)
+        loss = ((teacher_embd - proj_student)**2).mean()
         return loss
         ####################################  END OF YOUR CODE  ##################################
     
@@ -101,9 +103,9 @@ class PredictionLoss(nn.Module):
         # The F.softmax and F.log_softmax will be helpful here
         # Also keep in mind that the last dimension of the prediction is the feature dimension.
         teacher_pred.detach_()
-        target_terms = 0
-        pred_terms = 0
-        samplewise_sce = 0
+        target_terms = F.softmax(teacher_pred/t, dim=-1)
+        pred_terms = F.log_softmax(student_pred/t, dim=-1)
+        samplewise_sce =  target_terms * (- pred_terms)
         mean_sce = samplewise_sce.mean()
         return mean_sce
         ####################################  END OF YOUR CODE  ##################################
@@ -151,17 +153,17 @@ class KnowledgeDistillationLoss(nn.Module):
         hidden_loss = 0
         for st_i,te_i in enumerate(self.layer_mapping):
             attn_fn = self.__getattr__(f"attention_loss{st_i}")
-            attention_loss += 0
+            attention_loss += attn_fn(teacher_out['attentions'][te_i], student_out['attentions'][st_i])
             hddn_fn = self.__getattr__(f"hidden_loss{st_i}")
-            hidden_loss += 0
+            hidden_loss += hddn_fn(teacher_out['hidden_states'][te_i], student_out['hidden_states'][st_i])
             
         # sum up the loss for each layer
-        loss = 0
+        loss = embedding_loss + attention_loss + hidden_loss
         
         # apply the prediction penalty during task distillation
         if penalize_prediction:
-            prediction_loss = 0
-            loss += 0
+            prediction_loss = self.prediction_loss(teacher_out['logits'], student_out['logits'])
+            loss += prediction_loss 
         return loss
         ####################################  END OF YOUR CODE  ##################################
         
